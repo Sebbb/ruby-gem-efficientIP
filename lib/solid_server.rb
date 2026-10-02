@@ -25,3 +25,5 @@ end
 
 require_relative 'solid_server/solid_server'
 require_relative 'ip_subnet/ip_subnet'
+require_relative 'ip_address/ip_address'
+require_relative 'additional/solid_server_ip_addr.rb'

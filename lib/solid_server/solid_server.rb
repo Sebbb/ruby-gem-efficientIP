@@ -9,6 +9,9 @@ module SOLIDserver
   class SOLIDserverError < StandardError
   end
 
+  class AuthenticationFailed < SOLIDserverError
+  end
+
   class SOLIDserver
     SERVICES = { 'ip_site_add' => 'This service allows to update an IP address Space.',
                  'ip_site_count' => 'This service returns the number of IP address Spaces matching optional condition(s).',
@@ -41,6 +44,7 @@ module SOLIDserver
                  'ip_address_count' => 'This service returns the number of IPv4 Addresses matching optional condition(s).',
                  'ip_address_list' => 'This service returns a list of IPv4 Addresses matching optional condition(s).',
                  'ip_address_info' => 'This service returns information about a specific IPv4 Address.',
+                 'ip_address_delete' => 'This service allows to delete a specific IPv4 Address.',
                  'ip_delete' => 'This service allows to delete a specific IPv4 Address.',
                  'ip_find_free_address' => 'This service allows to retrieve a list of available IPv4 Addresses matching optional condition(s).',
                  'ip6_address6_add' => 'This service allows to update an IPv6 Address',
@@ -105,7 +109,7 @@ module SOLIDserver
     #   timeout: HTTP query timeout (default 8)
     def initialize(host:, username:, password:, port: 443, sslcheck: true, timeout: 8)
       @resturl  = format('https://%s:%d/rest', host, port)
-      @rpcurl   = format('https://%s:%d/rpc', host, port)
+      # @rpcurl   = format('https://%s:%d/rpc', host, port)
       @timeout  = timeout
       @sslcheck = sslcheck
       @username = Base64.strict_encode64(username)
@@ -130,21 +134,26 @@ module SOLIDserver
         end
       end
 
-      # pp [rest_method, rest_service, args]
+      pp [rest_method, rest_service, args]
 
-      begin
-        RestClient::Request.execute(
-          url: format('%s/%s?', (rest_service.match(/find_free/) ? @rpcurl : @resturl), rest_service) + rest_args,
-          accept: 'application/json',
-          method: rest_method,
-          timeout: @timeout,
-          verify_ssl: @sslcheck,
-          headers: {
-            'X-IPM-Username' => @username,
-            'X-IPM-Password' => @password
-          }
-        )
-      rescue RestClient::ExceptionWithResponse => e
+      RestClient::Request.execute(
+        # url: format('%s/%s?', (rest_service.match(/find_free/) ? @rpcurl : @resturl), rest_service) + rest_args,
+        url: format('%s/%s?', @resturl, rest_service) + rest_args,
+        accept: 'application/json',
+        method: rest_method,
+        timeout: @timeout,
+        verify_ssl: @sslcheck,
+        headers: {
+          'X-IPM-Username' => @username,
+          'X-IPM-Password' => @password
+        }
+      )
+    rescue RestClient::ExceptionWithResponse => e
+      case e
+      when RestClient::Unauthorized
+        raise AuthenticationFailed, e.message
+      else
+        warn JSON.parse(e.response.body).inspect
         raise SOLIDserverError, "SOLIDserver REST call error: #{e.message}"
       end
     end
@@ -155,89 +164,85 @@ module SOLIDserver
       buffer = ''
       descr_mapping = {}
 
-      buffer += "## Available Methods:\n\n"
-      buffer += "This GEM wraps the following SOLIDserver API calls, allowing you to interract with SOLIDserver DDI solution.\n"
+      buffer += "## Available Methods:\n\nThis GEM wraps the following SOLIDserver API calls, "
+      buffer += "allowing you to interact with SOLIDserver DDI solution.\n"
 
-      begin
-        SERVICES.each do |service_name, service_description|
-          buffer += "\n### Method - #{service_name}\n"
-          rest_answer = RestClient::Request.execute(
-            url: format('%s/%s', @resturl, service_name),
-            accept: 'application/json',
-            method: 'options',
-            timeout: @timeout,
-            verify_ssl: @sslcheck,
-            headers: {
-              'X-IPM-Username' => @username,
-              'X-IPM-Password' => @password
-            }
-          )
+      SERVICES.each do |service_name, service_description|
+        buffer += "\n### Method - #{service_name}\n"
+        # rest_answer = RestClient::Request.execute(
+        #  url: format('%s/%s', @resturl, service_name),
+        #  accept: 'application/json',
+        #  method: 'options',
+        #  timeout: @timeout,
+        #  verify_ssl: @sslcheck,
+        #  headers: {
+        #    'X-IPM-Username' => @username,
+        #    'X-IPM-Password' => @password
+        #  }
+        # )
 
-          first_input = true
-          first_output = true
+        rest_answer = call('options', service_name)
 
-          JSON.parse(rest_answer.body).each do |item|
-            if item.key?('description')
-              buffer += "Description\n\n"
-              buffer += "\t#{service_description}\n"
-            end
+        first_input = true
+        first_output = true
 
-            if item.key?('mandatory_addition_params') && service_name.match(/_add$/)
-              buffer += "\nMandatory Parameters\n\n"
-              buffer += "\t#{item['mandatory_addition_params'].gsub('&&', '+').gsub('||', '|')}\n"
-            end
+        JSON.parse(rest_answer.body).each do |item|
+          if item.key?('description')
+            buffer += "Description\n\n"
+            buffer += "\t#{service_description}\n"
+          end
 
-            # if item.key?('mandatory_edition_params') && service_name.match(/_update$/)
-            #   buffer += '\nMandatory Parameters\n\n'
-            #   buffer += "\\t#{item['mandatory_edition_params'].gsub('&&', '+').gsub('||', '|')}\n"
-            # end
+          if item.key?('mandatory_addition_params') && service_name.match(/_add$/)
+            buffer += "\nMandatory Parameters\n\n"
+            buffer += "\t#{item['mandatory_addition_params'].gsub('&&', '+').gsub('||', '|')}\n"
+          end
 
-            if item.key?('mandatory_params')
-              buffer += "\nMandatory Parameters\n\n"
-              buffer += "\t#{item['mandatory_params'].gsub('&&', '+').gsub('||', '|')}\n"
-            end
+          # if item.key?('mandatory_edition_params') && service_name.match(/_update$/)
+          #   buffer += '\nMandatory Parameters\n\n'
+          #   buffer += "\\t#{item['mandatory_edition_params'].gsub('&&', '+').gsub('||', '|')}\n"
+          # end
 
-            if item.key?('param_type')
-              if item['param_type'] == 'in'
-                if first_input == true
-                  buffer += "\nAvailable Input Parameters:\n\n"
-                  first_input = false
-                end
+          if item.key?('mandatory_params')
+            buffer += "\nMandatory Parameters\n\n"
+            buffer += "\t#{item['mandatory_params'].gsub('&&', '+').gsub('||', '|')}\n"
+          end
 
-                case item['name']
-                when 'WHERE'
-                  buffer += "\t* where - Can be used to filter the result using any output field in an SQL fashion.\n"
-                when 'ORDERBY'
-                  buffer += "\t* orderby - Can be used to order the result using any output field in an SQL fashion.\n"
-                else
-                  descr_key = service_name[/^(ip|vlm|dns)/]
-                  descr_mapping["#{descr_key}_#{item['name']}"] = item['descr'] if item.key?('descr')
-                  unless item.key?('descr') && item['name'].match(/^no_usertracking/)
-                    buffer += "\t* #{item['name']}#{item.key?('descr') ? " - #{item['descr']}" : ''}\n"
-                  end
-                end
-              else
-                if first_output == true
-                  buffer += "\nAvailable Output Fields:\n\n"
-                  first_output = false
-                end
-
-                descr_key = service_name[/^(ip|vlm|dns)/]
-
-                if item.key?('descr')
-                  descr_mapping["#{descr_key}_#{item['name']}"] = item['descr']
-                elsif descr_mapping.key?("#{descr_key}_#{item['name']}")
-                  item['descr'] = descr_mapping["#{descr_key}_#{item['name']}"]
-                end
-                buffer += "\t* #{item['name']}#{item.key?('descr') ? " - #{item['descr']}" : ''}\n"
+          if item.key?('param_type')
+            if item['param_type'] == 'in'
+              if first_input == true
+                buffer += "\nAvailable Input Parameters:\n\n"
+                first_input = false
               end
+
+              case item['name']
+              when 'WHERE'
+                buffer += "\t* where - Can be used to filter the result using any output field in an SQL fashion.\n"
+              when 'ORDERBY'
+                buffer += "\t* orderby - Can be used to order the result using any output field in an SQL fashion.\n"
+              else
+                descr_key = service_name[/^(ip|vlm|dns)/]
+                descr_mapping["#{descr_key}_#{item['name']}"] = item['descr'] if item.key?('descr')
+                unless item.key?('descr') && item['name'].match(/^no_usertracking/)
+                  buffer += "\t* #{item['name']}#{item.key?('descr') ? " - #{item['descr']}" : ''}\n"
+                end
+              end
+            else
+              if first_output == true
+                buffer += "\nAvailable Output Fields:\n\n"
+                first_output = false
+              end
+
+              descr_key = service_name[/^(ip|vlm|dns)/]
+
+              if item.key?('descr')
+                descr_mapping["#{descr_key}_#{item['name']}"] = item['descr']
+              elsif descr_mapping.key?("#{descr_key}_#{item['name']}")
+                item['descr'] = descr_mapping["#{descr_key}_#{item['name']}"]
+              end
+              buffer += "\t* #{item['name']}#{item.key?('descr') ? " - #{item['descr']}" : ''}\n"
             end
           end
         end
-
-        buffer
-      rescue RestClient::ExceptionWithResponse => e
-        raise SOLIDserverError, "SOLIDserver REST call error: #{e.message}"
       end
     end
   end

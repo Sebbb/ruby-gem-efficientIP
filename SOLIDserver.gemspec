@@ -6,14 +6,14 @@ $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
 
 Gem::Specification.new do |spec|
   spec.name          = 'SOLIDserver'
-  spec.version       = '0.0.11'
+  spec.version       = '0.1.0'
   spec.date          = '2024-11-12'
   spec.authors       = ['Sebastian Roesner']
   spec.email         = ['github-rubyefficientip@roesner-online.de']
   spec.description   = "A Ruby Object wrapper of SOLIDserver's REST API"
   spec.summary       = "This gem provide a Ruby object interface to EfficientIP's SOLIDserver REST API"
   spec.homepage      = 'https://github.com/Sebbb/ruby-gem-efficientIP'
-  spec.license       = 'BSD 2'
+  spec.license       = 'BSD-2-Clause'
 
   spec.files         = `git ls-files`.split
   spec.executables   = spec.files.grep(%r{^bin/}) { |f| File.basename(f) }
