@@ -56,10 +56,26 @@ module SOLIDserver
     end
 
     class << self
-      def get_by_ipaddr(ipaddr, site:)
-        ipaddr_hex = ipv4_dottedquad_to_hex(ipaddr)
-        search_query4 = "site_name='#{site}' AND ip_addr = '#{ipaddr_hex}'"
-        find(where: search_query4, limit: 1).first
+      def find_ipaddr(ipaddr, site:)
+        find_addresses([ipaddr], site: site).first
+      end
+
+      def find_ipaddresses(ipaddresses, site:)
+        [].tap do |all_results|
+          ipaddresses.each_slice(60) do |batch|
+            conditions = batch.map do |ipaddr|
+              ipaddr_hex = ipv4_dottedquad_to_hex(ipaddr)
+              "(ip_addr = '#{ipaddr_hex}')"
+            end.join(' OR ')
+
+            query = "site_name='#{site}' AND (#{conditions})"
+            all_results.concat(find(where: query, limit: batch.length))
+          end
+        end
+      end
+
+      def find_addresses(ipaddresses, site:)
+        find_ipaddresses(ipaddresses, site: site)
       end
 
       def ipv4_dottedquad_to_hex(str)
